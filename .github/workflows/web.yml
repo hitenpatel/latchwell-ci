@@ -1,0 +1,40 @@
+name: web
+on:
+  workflow_dispatch:
+    inputs:
+      sha: { description: "Forgejo commit", required: true }
+      deploy: { description: "deploy to production", type: boolean, default: false }
+permissions: { contents: read }
+concurrency: { group: web-deploy, cancel-in-progress: false }
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Clone source at sha
+        env: { HOST: "${{ secrets.FORGEJO_HOST }}", TOKEN: "${{ secrets.FORGEJO_CLONE_TOKEN }}", SHA: "${{ inputs.sha }}" }
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::bad sha"; exit 1; }
+          AUTH=$(printf 'oauth2:%s' "$TOKEN" | base64); echo "::add-mask::$AUTH"; echo "::add-mask::$HOST"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone -q --branch main "https://${HOST}/hiten/latchwell.git" src 2>/dev/null || { echo "::error::clone failed"; exit 1; }
+          git -C src checkout -q "$SHA" || { echo "::error::checkout failed"; exit 1; }
+      - uses: actions/setup-node@39370e3970a6d050e4c0a9d3bac3d4e6b8ba4d1a # v4.1.0
+        with: { node-version: 22 }
+      - name: Vectors in sync
+        run: |
+          set -euo pipefail
+          R=src/ios/Packages/LatchwellProtocol/Tests/LatchwellProtocolTests/Resources
+          cmp -s src/protocol/vectors.json "$R/vectors.json" && echo "vectors: in sync" || { echo "::error::vectors out of sync"; exit 1; }
+          cmp -s src/protocol/point-cases.json "$R/point-cases.json" && echo "point-cases: in sync" || { echo "::error::point-cases out of sync"; exit 1; }
+      - name: Tests (summary only)
+        run: |
+          set -o pipefail
+          (cd src/protocol && npm ci --silent && npm run -s typecheck && npx vitest run --reporter=dot) > "$RUNNER_TEMP/protocol.log" 2>&1 && echo "protocol: pass" || { echo "protocol: FAIL"; grep -E "✗|×|FAIL|error TS" "$RUNNER_TEMP/protocol.log" | head -20; exit 1; }
+          (cd src/web && npm ci --silent && npm run -s typecheck && npx playwright install --with-deps chromium >/dev/null 2>&1 && npx vitest run --reporter=dot && npx playwright test --reporter=dot) > "$RUNNER_TEMP/web.log" 2>&1 && echo "web: pass" || { echo "web: FAIL"; grep -E "✗|×|FAIL|error TS|Error:" "$RUNNER_TEMP/web.log" | sed -E 's#/home/runner/[^ ]*##g' | head -20; exit 1; }
+      - name: Deploy
+        if: ${{ inputs.deploy }}
+        env: { CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}", CLOUDFLARE_ACCOUNT_ID: "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" }
+        run: |
+          set -o pipefail; cd src/web && npm run -s build
+          npx wrangler@3 pages deploy dist --project-name latchwell --branch main > "$RUNNER_TEMP/deploy.log" 2>&1 && grep -oE "https://[a-z0-9-]+\.latchwell\.pages\.dev" "$RUNNER_TEMP/deploy.log" | tail -1 || { echo "deploy: FAIL"; grep -iE "error" "$RUNNER_TEMP/deploy.log" | head -10; exit 1; }
