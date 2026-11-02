@@ -1,0 +1,29 @@
+name: swift-protocol
+on:
+  workflow_dispatch: { inputs: { sha: { description: "Forgejo commit to test", required: true } } }
+permissions: { contents: read }
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Clone source at sha
+        env: { HOST: "${{ secrets.FORGEJO_HOST }}", TOKEN: "${{ secrets.FORGEJO_CLONE_TOKEN }}", SHA: "${{ inputs.sha }}" }
+        run: |
+          set -euo pipefail
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 hex chars"; exit 1; }
+          AUTH=$(printf 'oauth2:%s' "$TOKEN" | base64); echo "::add-mask::$AUTH"; echo "::add-mask::$HOST"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone -q --branch main "https://${HOST}/hiten/latchwell.git" src 2>/dev/null
+          git -C src checkout -q "$SHA"
+      - name: Select newest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)" && xcodebuild -version | head -1
+      - name: Vectors in sync
+        run: |
+          set -euo pipefail
+          R=src/ios/Packages/LatchwellProtocol/Tests/LatchwellProtocolTests/Resources
+          cmp src/protocol/vectors.json "$R/vectors.json" && echo "vectors: in sync"
+          cmp src/protocol/point-cases.json "$R/point-cases.json" && echo "point-cases: in sync"
+      - name: Swift tests
+        run: |
+          set -o pipefail; cd src/ios/Packages/LatchwellProtocol
+          if swift test > "$RUNNER_TEMP/swift-test.log" 2>&1; then grep -cE "✔|passed" "$RUNNER_TEMP/swift-test.log" | sed 's/^/passed lines: /'; else grep -E "✘|failed|error:" "$RUNNER_TEMP/swift-test.log" | sed -E 's#/Users/runner/[^ ]*##g; s#src/[^ :]*##g' | head -20; exit 1; fi
