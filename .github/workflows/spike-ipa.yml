@@ -15,8 +15,8 @@ jobs:
           set -euo pipefail
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 hex chars"; exit 1; }
           AUTH=$(printf 'oauth2:%s' "$TOKEN" | base64); echo "::add-mask::$AUTH"; echo "::add-mask::$HOST"
-          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone -q --branch main "https://${HOST}/hiten/latchwell.git" src 2>/dev/null
-          git -C src checkout -q "$SHA"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone -q --branch main "https://${HOST}/hiten/latchwell.git" src 2>/dev/null || { echo "::error::clone failed"; exit 1; }
+          git -C src checkout -q "$SHA" || { echo "::error::checkout failed"; exit 1; }
       - name: Toolchain
         run: |
           sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; xcodebuild -version | head -1
@@ -31,20 +31,22 @@ jobs:
           IPA_PASSPHRASE: ${{ secrets.SPIKE_IPA_PASSPHRASE }}
         run: |
           set -euo pipefail
+          umask 077
           KEY="$RUNNER_TEMP/asc.p8"; echo "$ASC_KEY_B64" | base64 --decode > "$KEY"; chmod 600 "$KEY"
-          cd src/ios/Spike && xcodegen generate >/dev/null
+          sanitize() { sed -E 's#/Users/runner/[^ ]*##g; s#src/[^ :]*##g' | grep -E "error:" | head -20 || true; }
+          cd src/ios/Spike
+          xcodegen generate > "$RUNNER_TEMP/xcodegen.log" 2>&1 || { echo "xcodegen failed:"; sanitize < "$RUNNER_TEMP/xcodegen.log"; exit 1; }
           sed "s/TEAMID/$APPLE_TEAM_ID/" "$GITHUB_WORKSPACE/ci/.github/scripts/export-dev.plist" > "$RUNNER_TEMP/export.plist"
           AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
-          sanitize() { sed -E 's#/Users/runner/[^ ]*##g; s#src/[^ :]*##g' | grep -E "error:" | head -20 || true; }
           xcodebuild archive -project LatchwellSpike.xcodeproj -scheme LatchwellSpike -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Spike.xcarchive" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" "${AUTH[@]}" > "$RUNNER_TEMP/archive.log" 2>&1 || { echo "archive failed:"; sanitize < "$RUNNER_TEMP/archive.log"; exit 1; }
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Spike.xcarchive" -exportPath "$RUNNER_TEMP/out" -exportOptionsPlist "$RUNNER_TEMP/export.plist" "${AUTH[@]}" > "$RUNNER_TEMP/export.log" 2>&1 || { echo "export failed:"; sanitize < "$RUNNER_TEMP/export.log"; exit 1; }
           IPA=$(ls "$RUNNER_TEMP"/out/*.ipa | head -1)
           ENT=$(codesign -d --entitlements :- "$RUNNER_TEMP/Spike.xcarchive/Products/Applications/LatchwellSpike.app" 2>/dev/null || true)
           if grep -q family-controls <<<"$ENT"; then echo "entitlement: family-controls present"; else echo "::warning::family-controls entitlement not found in archive"; fi
-          openssl enc -aes-256-cbc -pbkdf2 -salt -in "$IPA" -out "$RUNNER_TEMP/LatchwellSpike.ipa.enc" -pass env:IPA_PASSPHRASE
+          openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -salt -in "$IPA" -out "$RUNNER_TEMP/LatchwellSpike.ipa.enc" -pass env:IPA_PASSPHRASE
           echo "ipa: $(stat -f%z "$IPA") bytes, encrypted"
       - name: Cleanup signing material
         if: always()
-        run: rm -f "$RUNNER_TEMP/asc.p8"; rm -rf "$RUNNER_TEMP/out" "$RUNNER_TEMP/Spike.xcarchive" "$RUNNER_TEMP/archive.log" "$RUNNER_TEMP/export.log"
+        run: rm -f "$RUNNER_TEMP/asc.p8"; rm -rf "$RUNNER_TEMP/out" "$RUNNER_TEMP/Spike.xcarchive" "$RUNNER_TEMP/archive.log" "$RUNNER_TEMP/export.log" "$RUNNER_TEMP/xcodegen.log"
       - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         with: { name: LatchwellSpike-ipa-enc, path: "${{ runner.temp }}/LatchwellSpike.ipa.enc", retention-days: 7, if-no-files-found: error }
