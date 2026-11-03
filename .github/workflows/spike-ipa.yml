@@ -43,7 +43,15 @@ jobs:
           IPA=$(ls "$RUNNER_TEMP"/out/*.ipa | head -1)
           ENT=$(codesign -d --entitlements :- "$RUNNER_TEMP/Spike.xcarchive/Products/Applications/LatchwellSpike.app" 2>/dev/null || true)
           if grep -q family-controls <<<"$ENT"; then echo "entitlement: family-controls present"; else echo "::warning::family-controls entitlement not found in archive"; fi
-          openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -salt -in "$IPA" -out "$RUNNER_TEMP/LatchwellSpike.ipa.enc" -pass env:IPA_PASSPHRASE
+          # Strip surrounding whitespace/newlines so the passphrase matches what is typed at the decrypt prompt.
+          IPA_PASS="$(printf '%s' "$IPA_PASSPHRASE" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"; export IPA_PASS
+          OSSL=/usr/bin/openssl; command -v /opt/homebrew/bin/openssl >/dev/null && OSSL=/opt/homebrew/bin/openssl
+          "$OSSL" version | head -1
+          "$OSSL" enc -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -salt -in "$IPA" -out "$RUNNER_TEMP/LatchwellSpike.ipa.enc" -pass env:IPA_PASS
+          "$OSSL" enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -in "$RUNNER_TEMP/LatchwellSpike.ipa.enc" -out "$RUNNER_TEMP/roundtrip.ipa" -pass env:IPA_PASS
+          cmp -s "$IPA" "$RUNNER_TEMP/roundtrip.ipa" && echo "encryption round-trip: ok" || { echo "::error::encryption round-trip failed"; exit 1; }
+          echo "ipa sha256: $(shasum -a 256 "$IPA" | cut -c1-16)…  passphrase length: ${#IPA_PASS} chars"
+          rm -f "$RUNNER_TEMP/roundtrip.ipa"
           echo "ipa: $(stat -f%z "$IPA") bytes, encrypted"
       - name: Cleanup signing material
         if: always()
