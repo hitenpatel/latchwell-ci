@@ -19,7 +19,7 @@ jobs:
           AUTH=$(printf 'oauth2:%s' "$TOKEN" | base64); echo "::add-mask::$AUTH"; echo "::add-mask::$HOST"
           git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone -q --branch main "https://${HOST}/hiten/latchwell.git" src 2>/dev/null || { echo "::error::clone failed"; exit 1; }
           git -C src checkout -q "$SHA" || { echo "::error::checkout failed"; exit 1; }
-      - uses: actions/setup-node@39370e3970a6d050e4c0a9d3bac3d4e6b8ba4d1a # v4.1.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 22 }
       - name: Vectors in sync
         run: |
