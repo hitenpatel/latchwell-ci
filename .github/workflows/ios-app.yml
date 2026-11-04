@@ -85,7 +85,12 @@ jobs:
           IPA=$(ls "$RUNNER_TEMP"/out/*.ipa | head -1)
           for t in Latchwell PlugIns/LatchwellMonitor.appex PlugIns/LatchwellShieldConfig.appex PlugIns/LatchwellShieldAction.appex; do
             P="$RUNNER_TEMP/App.xcarchive/Products/Applications/Latchwell.app"; [ "$t" = Latchwell ] || P="$P/$t"
-            codesign -d --entitlements :- "$P" 2>/dev/null | grep -q family-controls && echo "entitlement ok: $t" || echo "::warning::family-controls missing: $t"
+            ENT=$(codesign -d --entitlements :- "$P" 2>/dev/null || true)
+            for want in com.apple.developer.family-controls group.app.latchwell; do
+              grep -q "$want" <<<"$ENT" || { echo "::error::$want missing from $t"; exit 1; }
+            done
+            if [ "$t" = Latchwell ]; then grep -q "applinks:latchwell.app" <<<"$ENT" || { echo "::error::associated domain missing"; exit 1; }; fi
+            echo "entitlements ok: $t"
           done
           IPA_PASS="$(printf '%s' "$IPA_PASSPHRASE" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"; export IPA_PASS
           OSSL=/usr/bin/openssl; command -v /opt/homebrew/bin/openssl >/dev/null && OSSL=/opt/homebrew/bin/openssl
