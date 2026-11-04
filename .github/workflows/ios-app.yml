@@ -64,6 +64,12 @@ jobs:
           else
             grep -vE "^\s*$" "$RUNNER_TEMP/maestro.log" | tail -40; exit 1
           fi
+      - name: Keep Maestro failure screenshots
+        if: ${{ failure() && inputs.maestro }}
+        run: mkdir -p "$RUNNER_TEMP/maestro-debug" && find "$HOME/.maestro/tests" -name "*.png" -exec cp {} "$RUNNER_TEMP/maestro-debug/" \; 2>/dev/null; ls "$RUNNER_TEMP/maestro-debug" | head -20
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        if: ${{ failure() && inputs.maestro }}
+        with: { name: maestro-screenshots, path: "${{ runner.temp }}/maestro-debug", retention-days: 3, if-no-files-found: ignore }
       - name: Development IPA (encrypted)
         if: ${{ inputs.ipa }}
         env:
