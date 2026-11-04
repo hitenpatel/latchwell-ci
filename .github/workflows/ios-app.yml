@@ -59,11 +59,15 @@ jobs:
           xcrun simctl boot "$SIM" 2>/dev/null || true; xcrun simctl bootstatus "$SIM" -b > /dev/null
           xcrun simctl install "$SIM" "$APP"
           cd src/ios/App
-          if maestro --device "$SIM" test maestro/ --format junit --output "$RUNNER_TEMP/maestro.xml" > "$RUNNER_TEMP/maestro.log" 2>&1; then
-            grep -E "Passed|Flow|✅" "$RUNNER_TEMP/maestro.log" | tail -10
-          else
-            grep -vE "^\s*$" "$RUNNER_TEMP/maestro.log" | tail -40; exit 1
-          fi
+          # The XCUITest driver can take minutes to start on a busy runner; one full retry absorbs that.
+          export MAESTRO_DRIVER_STARTUP_TIMEOUT=240000
+          for attempt in 1 2; do
+            if maestro --device "$SIM" test maestro/ --format junit --output "$RUNNER_TEMP/maestro.xml" > "$RUNNER_TEMP/maestro.log" 2>&1; then
+              grep -E "Passed|Flow|✅" "$RUNNER_TEMP/maestro.log" | tail -10; exit 0
+            fi
+            echo "maestro attempt $attempt failed:"; grep -E "Passed|Failed|Flows|DriverTimeout" "$RUNNER_TEMP/maestro.log" | tail -12
+          done
+          exit 1
       - name: Maestro diagnostics
         if: ${{ failure() && inputs.maestro }}
         run: |
