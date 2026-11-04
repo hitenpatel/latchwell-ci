@@ -64,9 +64,20 @@ jobs:
           else
             grep -vE "^\s*$" "$RUNNER_TEMP/maestro.log" | tail -40; exit 1
           fi
-      - name: Keep Maestro failure screenshots
+      - name: Maestro diagnostics
         if: ${{ failure() && inputs.maestro }}
-        run: mkdir -p "$RUNNER_TEMP/maestro-debug" && find "$HOME/.maestro/tests" -name "*.png" -exec cp {} "$RUNNER_TEMP/maestro-debug/" \; 2>/dev/null; ls "$RUNNER_TEMP/maestro-debug" | head -20
+        run: |
+          D="$RUNNER_TEMP/maestro-debug"; mkdir -p "$D"
+          python3 - "$RUNNER_TEMP/maestro.xml" <<'PY' || true
+          import sys, xml.etree.ElementTree as ET
+          for tc in ET.parse(sys.argv[1]).iter("testcase"):
+            for f in list(tc.findall("failure")) + list(tc.findall("error")):
+              print(tc.get("name"), "->", (f.get("message") or f.text or "")[:300].replace("\n", " "))
+          PY
+          find "$HOME/.maestro/tests" -type f \( -name "*.png" -o -name "maestro.log" \) -exec cp {} "$D/" \; 2>/dev/null || true
+          L=$(ls -t "$HOME"/.maestro/tests/*/maestro.log 2>/dev/null | head -1); [ -n "$L" ] && grep -E "ERROR|Exception|crash|Crash|launch" "$L" | tail -15
+          for f in "$HOME"/Library/Logs/DiagnosticReports/Latchwell*; do [ -e "$f" ] || continue; cp "$f" "$D/"; echo "crash report: $(basename "$f")"; grep -E '"exception"|"type"|"signal"|Latchwell.*0x' "$f" | head -8; done
+          ls "$D" | head -30
       - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         if: ${{ failure() && inputs.maestro }}
         with: { name: maestro-screenshots, path: "${{ runner.temp }}/maestro-debug", retention-days: 3, if-no-files-found: ignore }
