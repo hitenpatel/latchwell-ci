@@ -1,0 +1,58 @@
+name: asc-certs
+# Lists the team's signing certificates via the App Store Connect API (no secrets printed). With `revoke`, revokes
+# the listed development certificates by serial number. The Mac's two signing identities (SHA-1 prefixes below) are
+# always refused, as are non-development certificates.
+on:
+  workflow_dispatch:
+    inputs:
+      revoke: { description: "comma-separated serial numbers of DEVELOPMENT certificates to revoke (empty = list only)", required: false, default: "" }
+permissions: { contents: read }
+jobs:
+  certs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: List (and optionally revoke) certificates
+        env:
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_KEY_B64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_B64 }}
+          REVOKE: ${{ inputs.revoke }}
+        run: |
+          set -euo pipefail
+          pip install -q pyjwt cryptography >/dev/null 2>&1
+          python3 - <<'PY'
+          import base64, hashlib, json, os, re, time, urllib.request, jwt
+          from cryptography import x509
+          PROTECTED = ("7349C809", "232FE23B")  # the Mac's Apple Development identities (owner-confirmed, RadioShake device tests)
+          key = base64.b64decode(os.environ["ASC_KEY_B64"]).decode()
+          tok = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()), "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
+                           key, algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+          def call(url, method="GET"):
+              r = urllib.request.Request(url, method=method, headers={"Authorization": f"Bearer {tok}"})
+              with urllib.request.urlopen(r) as resp:
+                  body = resp.read()
+                  return json.loads(body) if body else {}
+          d = call("https://api.appstoreconnect.apple.com/v1/certificates?limit=200")
+          rows = {}
+          for c in d["data"]:
+              a = c["attributes"]
+              der = base64.b64decode(a.get("certificateContent") or "")
+              sha1 = hashlib.sha1(der).hexdigest().upper() if der else "?"
+              created = "?"
+              if der:
+                  cert = x509.load_der_x509_certificate(der)
+                  created = cert.not_valid_before_utc.strftime("%Y-%m-%d %H:%M")
+              rows[a["serialNumber"]] = (c["id"], a["certificateType"], sha1)
+              print(f'{a["certificateType"]:<22} serial={a["serialNumber"]} sha1={sha1[:8]} created={created} expires={a["expirationDate"][:10]} name="{a.get("name")}"'
+                    + ("  [PROTECTED]" if sha1.startswith(PROTECTED) else ""))
+          print(f"total: {len(d['data'])}")
+          want = [s.strip() for s in os.environ.get("REVOKE", "").split(",") if s.strip()]
+          for s in want:
+              if s not in rows: print(f"revoke {s}: not found"); continue
+              cid, ctype, sha1 = rows[s]
+              if sha1.startswith(PROTECTED): print(f"revoke {s}: REFUSED (protected Mac identity)"); continue
+              if ctype not in ("DEVELOPMENT", "IOS_DEVELOPMENT"): print(f"revoke {s}: REFUSED (type {ctype})"); continue
+              call(f"https://api.appstoreconnect.apple.com/v1/certificates/{cid}", "DELETE")
+              print(f"revoke {s}: revoked")
+          PY
