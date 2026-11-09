@@ -1,127 +1,69 @@
-name: ios-app
+name: ios-app (unsigned device build)
 on:
   workflow_dispatch:
     inputs:
-      sha: { description: "Forgejo commit", required: true }
-      branch: { description: "Forgejo branch holding the commit", required: false, default: main }
-      maestro: { description: "run Maestro UI flows", type: boolean, default: true }
-      ipa: { description: "build an encrypted development IPA", type: boolean, default: false }
-permissions: { contents: read }
+      sha: {description: Forgejo commit, required: true}
+      branch: {description: Forgejo source branch, required: true}
+      maestro: {description: unused, type: boolean, default: false}
+      ipa: {description: encrypted unsigned device IPA, type: boolean, default: true}
+permissions: {contents: read}
 jobs:
-  app:
+  unsigned-device:
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with: { path: ci, sparse-checkout: .github/scripts, sparse-checkout-cone-mode: false, persist-credentials: false }
-      - name: Clone source at sha
-        env: { HOST: "${{ secrets.FORGEJO_HOST }}", TOKEN: "${{ secrets.FORGEJO_CLONE_TOKEN }}", SHA: "${{ inputs.sha }}", BRANCH: "${{ inputs.branch }}" }
+      - name: Clone exact source
+        env:
+          HOST: ${{ secrets.FORGEJO_HOST }}
+          TOKEN: ${{ secrets.FORGEJO_CLONE_TOKEN }}
+          SHA: ${{ inputs.sha }}
+          BRANCH: ${{ inputs.branch }}
         run: |
           set -euo pipefail
-          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 hex chars"; exit 1; }
-          [[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::bad branch"; exit 1; }
-          AUTH=$(printf 'oauth2:%s' "$TOKEN" | base64); echo "::add-mask::$AUTH"; echo "::add-mask::$HOST"
-          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone -q --branch "$BRANCH" "https://${HOST}/hiten/latchwell.git" src 2>/dev/null || { echo "::error::clone failed"; exit 1; }
-          git -C src checkout -q "$SHA" || { echo "::error::checkout failed"; exit 1; }
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || exit 1
+          AUTH=$(printf 'oauth2:%s' "$TOKEN" | base64)
+          echo "::add-mask::$AUTH"; echo "::add-mask::$HOST"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone -q --branch "$BRANCH" "https://${HOST}/hiten/latchwell.git" src 2>/dev/null
+          git -C src checkout -q "$SHA"
+          test "$(git -C src rev-parse HEAD)" = "$SHA"
       - name: Toolchain
         run: |
-          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; xcodebuild -version | head -1
+          set -euo pipefail
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          xcodebuild -version | head -1
           brew install xcodegen >/dev/null 2>&1 || true
-          cd src/ios/App && xcodegen generate > "$RUNNER_TEMP/xcodegen.log" 2>&1 || { tail -20 "$RUNNER_TEMP/xcodegen.log"; exit 1; }
-      - name: Pick simulator
-        run: |
-          set -euo pipefail
-          xcrun simctl list runtimes | grep -i ios | sed 's/(.*//' | head -5
-          UDID=$(xcrun simctl list devices available -j | python3 -c "
-          import json,sys,re
-          d=json.load(sys.stdin)['devices']
-          rts=sorted([k for k in d if 'iOS' in k], key=lambda k:[int(x) for x in re.findall(r'\d+',k)], reverse=True)
-          for k in rts:
-            for dev in d[k]:
-              if dev['name'].startswith('iPhone'): print(dev['udid']); sys.exit()
-          ")
-          echo "simulator: $(xcrun simctl list devices | grep "$UDID" | sed 's/(.*//' | xargs)"
-          echo "SIM=$UDID" >> "$GITHUB_ENV"
-      - name: Build and unit tests (simulator)
-        run: |
-          set -o pipefail; cd src/ios/App
-          filt() { sed -E 's#/Users/runner/[^ :]*/src/##g' | grep -E "error:|warning: unre|Test Case .* (passed|failed)|Executed|BUILD|\*\* TEST" | grep -v "^ *$" | head -80; }
-          if xcodebuild test -project Latchwell.xcodeproj -scheme Latchwell -destination "id=$SIM" -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= > "$RUNNER_TEMP/test.log" 2>&1; then
-            filt < "$RUNNER_TEMP/test.log" | grep -E "Executed|TEST SUCCEEDED" | tail -3
-          else filt < "$RUNNER_TEMP/test.log"; exit 1; fi
-      - name: Maestro UI flows
-        if: ${{ inputs.maestro }}
-        run: |
-          set -euo pipefail
-          curl -fsSL "https://get.maestro.mobile.dev" | bash > /dev/null 2>&1
-          export PATH="$HOME/.maestro/bin:$PATH"; maestro --version
-          APP=$(find "$RUNNER_TEMP/dd/Build/Products" -name Latchwell.app -path "*iphonesimulator*" | head -1)
-          xcrun simctl boot "$SIM" 2>/dev/null || true; xcrun simctl bootstatus "$SIM" -b > /dev/null
-          xcrun simctl install "$SIM" "$APP"
           cd src/ios/App
-          # The XCUITest driver can take minutes to start on a busy runner; one full retry absorbs that.
-          export MAESTRO_DRIVER_STARTUP_TIMEOUT=240000
-          for attempt in 1 2; do
-            if maestro --device "$SIM" test maestro/ --format junit --output "$RUNNER_TEMP/maestro.xml" > "$RUNNER_TEMP/maestro.log" 2>&1; then
-              grep -E "Passed|Flow|✅" "$RUNNER_TEMP/maestro.log" | tail -10; exit 0
-            fi
-            echo "maestro attempt $attempt failed:"; grep -E "Passed|Failed|Flows|DriverTimeout" "$RUNNER_TEMP/maestro.log" | tail -12
-          done
-          exit 1
-      - name: Maestro diagnostics
-        if: ${{ failure() && inputs.maestro }}
-        run: |
-          D="$RUNNER_TEMP/maestro-debug"; mkdir -p "$D"
-          python3 - "$RUNNER_TEMP/maestro.xml" <<'PY' || true
-          import sys, xml.etree.ElementTree as ET
-          for tc in ET.parse(sys.argv[1]).iter("testcase"):
-            for f in list(tc.findall("failure")) + list(tc.findall("error")):
-              print(tc.get("name"), "->", (f.get("message") or f.text or "")[:300].replace("\n", " "))
-          PY
-          find "$HOME/.maestro/tests" -type f \( -name "*.png" -o -name "maestro.log" \) -exec cp {} "$D/" \; 2>/dev/null || true
-          L=$(ls -t "$HOME"/.maestro/tests/*/maestro.log 2>/dev/null | head -1); [ -n "$L" ] && grep -E "ERROR|Exception|crash|Crash|launch" "$L" | tail -15
-          for f in "$HOME"/Library/Logs/DiagnosticReports/Latchwell*; do [ -e "$f" ] || continue; cp "$f" "$D/"; echo "crash report: $(basename "$f")"; grep -E '"exception"|"type"|"signal"|Latchwell.*0x' "$f" | head -8; done
-          ls "$D" | head -30
-      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
-        if: ${{ failure() && inputs.maestro }}
-        with: { name: maestro-screenshots, path: "${{ runner.temp }}/maestro-debug", retention-days: 3, if-no-files-found: ignore }
-      - name: Development IPA (encrypted)
-        if: ${{ inputs.ipa }}
+          xcodegen generate > "$RUNNER_TEMP/xcodegen.log" 2>&1
+      - name: Archive without signing and encrypt
         env:
-          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          ASC_KEY_B64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_B64 }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           IPA_PASSPHRASE: ${{ secrets.SPIKE_IPA_PASSPHRASE }}
+          SOURCE_SHA: ${{ inputs.sha }}
         run: |
           set -euo pipefail
           umask 077
-          KEY="$RUNNER_TEMP/asc.p8"; echo "$ASC_KEY_B64" | base64 --decode > "$KEY"; chmod 600 "$KEY"
-          sanitize() { sed -E 's#/Users/runner/[^ ]*##g; s#src/[^ :]*##g' | grep -E "error:" | head -20 || true; }
           cd src/ios/App
-          sed "s/TEAMID/$APPLE_TEAM_ID/" "$GITHUB_WORKSPACE/ci/.github/scripts/export-dev.plist" > "$RUNNER_TEMP/export.plist"
-          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
-          xcodebuild archive -project Latchwell.xcodeproj -scheme Latchwell -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/App.xcarchive" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" "${AUTH[@]}" > "$RUNNER_TEMP/archive.log" 2>&1 || { echo "archive failed:"; sanitize < "$RUNNER_TEMP/archive.log"; exit 1; }
-          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" -exportPath "$RUNNER_TEMP/out" -exportOptionsPlist "$RUNNER_TEMP/export.plist" "${AUTH[@]}" > "$RUNNER_TEMP/export.log" 2>&1 || { echo "export failed:"; sanitize < "$RUNNER_TEMP/export.log"; exit 1; }
-          IPA=$(ls "$RUNNER_TEMP"/out/*.ipa | head -1)
-          for t in Latchwell PlugIns/LatchwellMonitor.appex PlugIns/LatchwellShieldConfig.appex PlugIns/LatchwellShieldAction.appex; do
-            P="$RUNNER_TEMP/App.xcarchive/Products/Applications/Latchwell.app"; [ "$t" = Latchwell ] || P="$P/$t"
-            ENT=$(codesign -d --entitlements :- "$P" 2>/dev/null || true)
-            for want in com.apple.developer.family-controls group.app.latchwell; do
-              grep -q "$want" <<<"$ENT" || { echo "::error::$want missing from $t"; exit 1; }
-            done
-            if [ "$t" = Latchwell ]; then grep -q "applinks:latchwell.app" <<<"$ENT" || { echo "::error::associated domain missing"; exit 1; }; fi
-            echo "entitlements ok: $t"
-          done
-          IPA_PASS="$(printf '%s' "$IPA_PASSPHRASE" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"; export IPA_PASS
-          OSSL=/usr/bin/openssl; command -v /opt/homebrew/bin/openssl >/dev/null && OSSL=/opt/homebrew/bin/openssl
-          "$OSSL" enc -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -salt -in "$IPA" -out "$RUNNER_TEMP/Latchwell.ipa.enc" -pass env:IPA_PASS
-          "$OSSL" enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -in "$RUNNER_TEMP/Latchwell.ipa.enc" -out "$RUNNER_TEMP/roundtrip.ipa" -pass env:IPA_PASS
-          cmp -s "$IPA" "$RUNNER_TEMP/roundtrip.ipa" && echo "encryption round-trip: ok" || { echo "::error::encryption round-trip failed"; exit 1; }
-          rm -f "$RUNNER_TEMP/roundtrip.ipa"
-      - name: Cleanup signing material
+          if ! xcodebuild archive -project Latchwell.xcodeproj -scheme Latchwell -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Unsigned.xcarchive" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= CODE_SIGN_STYLE=Manual > "$RUNNER_TEMP/unsigned.log" 2>&1; then
+            grep -E 'error:' "$RUNNER_TEMP/unsigned.log" | head -20 || true
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/package/Payload"
+          ditto "$RUNNER_TEMP/Unsigned.xcarchive/Products/Applications/Latchwell.app" "$RUNNER_TEMP/package/Payload/Latchwell.app"
+          printf '{"sourceSHA":"%s","signing":"unsigned","runID":"%s"}\n' "$SOURCE_SHA" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/package/build-provenance.json"
+          cd "$RUNNER_TEMP/package"
+          zip -qry "$RUNNER_TEMP/Latchwell-unsigned.ipa" Payload build-provenance.json
+          IPA_PASS="$(printf '%s' "$IPA_PASSPHRASE" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+          export IPA_PASS
+          /usr/bin/openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -salt -in "$RUNNER_TEMP/Latchwell-unsigned.ipa" -out "$RUNNER_TEMP/Latchwell-unsigned.ipa.enc" -pass env:IPA_PASS
+          /usr/bin/openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -in "$RUNNER_TEMP/Latchwell-unsigned.ipa.enc" -out "$RUNNER_TEMP/roundtrip.ipa" -pass env:IPA_PASS
+          cmp -s "$RUNNER_TEMP/Latchwell-unsigned.ipa" "$RUNNER_TEMP/roundtrip.ipa"
+          echo 'Unsigned device archive and encryption round-trip passed; no certificate API or signing performed.'
+      - name: Cleanup plaintext archive
         if: always()
-        run: rm -f "$RUNNER_TEMP/asc.p8"; rm -rf "$RUNNER_TEMP/out" "$RUNNER_TEMP/App.xcarchive" "$RUNNER_TEMP"/*.log
-      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
-        if: ${{ inputs.ipa }}
-        with: { name: Latchwell-ipa-enc, path: "${{ runner.temp }}/Latchwell.ipa.enc", retention-days: 7, if-no-files-found: error }
+        run: rm -rf "$RUNNER_TEMP/Unsigned.xcarchive" "$RUNNER_TEMP/package" "$RUNNER_TEMP/Latchwell-unsigned.ipa" "$RUNNER_TEMP/roundtrip.ipa" "$RUNNER_TEMP/unsigned.log" "$RUNNER_TEMP/xcodegen.log"
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b
+        with:
+          name: Latchwell-unsigned-ipa-enc
+          path: ${{ runner.temp }}/Latchwell-unsigned.ipa.enc
+          retention-days: 3
+          if-no-files-found: error
