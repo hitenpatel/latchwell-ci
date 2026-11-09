@@ -53,6 +53,7 @@ jobs:
           cd "$RUNNER_TEMP/package"
           zip -qry "$RUNNER_TEMP/Latchwell-unsigned.ipa" Payload build-provenance.json
           IPA_PASS="$(printf '%s' "$IPA_PASSPHRASE" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+          test -n "$IPA_PASS" || { echo "::error::IPA encryption passphrase is empty"; exit 1; }
           export IPA_PASS
           /usr/bin/openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -salt -in "$RUNNER_TEMP/Latchwell-unsigned.ipa" -out "$RUNNER_TEMP/Latchwell-unsigned.ipa.enc" -pass env:IPA_PASS
           /usr/bin/openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 600000 -in "$RUNNER_TEMP/Latchwell-unsigned.ipa.enc" -out "$RUNNER_TEMP/roundtrip.ipa" -pass env:IPA_PASS
