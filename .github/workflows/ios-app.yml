@@ -1,4 +1,4 @@
-name: ios-app (unsigned device build)
+name: ios-app (unsigned Debug device build)
 on:
   workflow_dispatch:
     inputs:
@@ -43,7 +43,7 @@ jobs:
           set -euo pipefail
           umask 077
           cd src/ios/App
-          if ! xcodebuild archive -project Latchwell.xcodeproj -scheme Latchwell -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Unsigned.xcarchive" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= CODE_SIGN_STYLE=Manual > "$RUNNER_TEMP/unsigned.log" 2>&1; then
+          if ! xcodebuild archive -project Latchwell.xcodeproj -scheme Latchwell -configuration Debug -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Unsigned.xcarchive" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= CODE_SIGN_STYLE=Manual > "$RUNNER_TEMP/unsigned.log" 2>&1; then
             grep -E 'error:' "$RUNNER_TEMP/unsigned.log" | head -20 || true
             exit 1
           fi
