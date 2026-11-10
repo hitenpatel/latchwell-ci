@@ -13,9 +13,8 @@ jobs:
           sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
           xcodebuild -version | head -2
           SDK=$(xcrun --sdk iphoneos --show-sdk-path); echo "SDK $(xcrun --sdk iphoneos --show-sdk-version) $SDK"
-          for fw in ManagedSettings FamilyControls DeviceActivity; do
-            for f in $(find "$SDK/System/Library/Frameworks/$fw.framework" -name '*.swiftinterface' | grep -i 'arm64-apple-ios.swiftinterface$\|arm64e-apple-ios.swiftinterface$' | head -1); do
-              echo "=== $fw: $f"
-              grep -n -i -B3 -A6 'expir\|func refresh\|TokenRefresh\|invalidat' "$f" | head -200
-            done
-          done
+          MS=$(find "$SDK/System/Library/Frameworks/ManagedSettings.framework" -name 'arm64e-apple-ios.swiftinterface' | head -1)
+          echo "=== ManagedSettings 400-500"; sed -n 400,500p "$MS"
+          echo "=== Expir across Screen Time frameworks"
+          grep -rn -i 'expir' "$SDK/System/Library/Frameworks/ManagedSettings.framework" "$SDK/System/Library/Frameworks/FamilyControls.framework" "$SDK/System/Library/Frameworks/DeviceActivity.framework" "$SDK/System/Library/Frameworks/ManagedSettingsUI.framework" 2>/dev/null | grep -v '\.tbd' | head -60 || true
+          echo "=== done"; true
