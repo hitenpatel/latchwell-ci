@@ -31,7 +31,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
-          xcodebuild -version | head -1
+          xcodebuild -version > "$RUNNER_TEMP/xcv.txt" 2>&1 || true; head -1 "$RUNNER_TEMP/xcv.txt"
           brew install xcodegen >/dev/null 2>&1 || true
           cd src/ios/App
           xcodegen generate > "$RUNNER_TEMP/xcodegen.log" 2>&1
