@@ -68,6 +68,15 @@ jobs:
             echo "maestro attempt $attempt failed:"; grep -E "Passed|Failed|Flows|DriverTimeout" "$RUNNER_TEMP/maestro.log" | tail -12
           done
           exit 1
+      - name: Collect Maestro screen captures
+        if: ${{ always() && inputs.maestro }}
+        run: |
+          D="$RUNNER_TEMP/maestro-screens"; mkdir -p "$D"
+          find src/ios/App -maxdepth 2 -name "*.png" -newer src/ios/App/project.yml -exec cp {} "$D/" \; 2>/dev/null || true
+          ls "$D" | head -60
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        if: ${{ always() && inputs.maestro }}
+        with: { name: maestro-screens, path: "${{ runner.temp }}/maestro-screens", retention-days: 5, if-no-files-found: ignore }
       - name: Maestro diagnostics
         if: ${{ failure() && inputs.maestro }}
         run: |
