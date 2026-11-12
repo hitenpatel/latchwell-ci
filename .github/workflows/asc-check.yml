@@ -26,15 +26,16 @@ jobs:
               r = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"})
               with urllib.request.urlopen(r, timeout=60) as resp: return json.load(resp)
           # GET only: lists existing development profiles; creates, edits and deletes nothing.
-          url = "https://api.appstoreconnect.apple.com/v1/profiles?filter[profileType]=IOS_APP_DEVELOPMENT&filter[profileState]=ACTIVE&limit=200"
+          url = "https://api.appstoreconnect.apple.com/v1/profiles?limit=200"
           want = {"app.latchwell.ios", "app.latchwell.ios.monitor", "app.latchwell.ios.shieldconfig", "app.latchwell.ios.shieldaction"}
           out = os.path.join(os.environ["RUNNER_TEMP"], "profiles"); n = 0
           while url:
               d = get(url)
+              print("page", len(d["data"]), [(x["attributes"]["name"], x["attributes"]["profileType"], x["attributes"]["profileState"]) for x in d["data"]])
               for p in d["data"]:
                   raw = base64.b64decode(p["attributes"]["profileContent"])
                   m = re.search(rb"<\?xml.*?</plist>", raw, re.S)
-                  if not m: continue
+                  if not m: print("no plist in", p["attributes"]["name"]); continue
                   pl = plistlib.loads(m.group(0))
                   appid = pl["Entitlements"].get("application-identifier", "")
                   bid = appid.split(".", 1)[1] if "." in appid else ""
