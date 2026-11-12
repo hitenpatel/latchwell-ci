@@ -1,4 +1,4 @@
-name: asc-check (read-only, fetch existing Latchwell dev profiles)
+name: asc-check (create Latchwell dev profiles for the Mac certificate)
 # Read-only: lists the Latchwell bundle IDs and their capabilities via the App Store Connect API.
 # Prints only identifiers and capability type names (no keys, ids or tokens).
 on: workflow_dispatch
@@ -25,28 +25,33 @@ jobs:
           def get(url):
               r = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"})
               with urllib.request.urlopen(r, timeout=60) as resp: return json.load(resp)
-          # GET only: lists existing development profiles; creates, edits and deletes nothing.
-          url = "https://api.appstoreconnect.apple.com/v1/profiles?limit=200"
-          want = {"app.latchwell.ios", "app.latchwell.ios.monitor", "app.latchwell.ios.shieldconfig", "app.latchwell.ios.shieldaction"}
+          # Owner-approved 2026-11-12: creates 4 development PROFILES for the Mac's existing certificate (SHA-1 7349C809...).
+          # Creates no certificate and revokes nothing.
+          def post(path, body):
+              r = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, data=json.dumps(body).encode(), method="POST",
+                                         headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
+              with urllib.request.urlopen(r, timeout=60) as resp: return json.load(resp)
+          base = "https://api.appstoreconnect.apple.com/v1"
+          cert = [c for c in get(base + "/certificates?limit=200")["data"]
+                  if hashlib.sha1(base64.b64decode(c["attributes"]["certificateContent"])).hexdigest().upper().startswith("7349C809")]
+          assert len(cert) == 1, f"mac cert matches: {len(cert)}"
+          dev = [d for d in get(base + "/devices?filter[udid]=00008030-0008553A1A79402E")["data"]]
+          assert len(dev) == 1, f"device matches: {len(dev)}"
           out = os.path.join(os.environ["RUNNER_TEMP"], "profiles"); n = 0
-          while url:
-              d = get(url)
-              print("page", len(d["data"]), [(x["attributes"]["name"], x["attributes"]["profileType"], x["attributes"]["profileState"]) for x in d["data"]])
-              for p in d["data"]:
-                  raw = base64.b64decode(p["attributes"]["profileContent"])
-                  m = re.search(rb"<\?xml.*?</plist>", raw, re.S)
-                  if not m: print("no plist in", p["attributes"]["name"]); continue
-                  pl = plistlib.loads(m.group(0))
-                  appid = pl["Entitlements"].get("application-identifier", "")
-                  bid = appid.split(".", 1)[1] if "." in appid else ""
-                  shas = [hashlib.sha1(c).hexdigest().upper()[:8] for c in pl.get("DeveloperCertificates", [])]
-                  dev = "00008030-0008553A1A79402E" in pl.get("ProvisionedDevices", [])
-                  fc = bool(pl["Entitlements"].get("com.apple.developer.family-controls"))
-                  print(bid or appid, p["attributes"]["name"], str(pl["ExpirationDate"])[:10], "mac7349:", "7349C809" in shas, "device:", dev, "familyControls:", fc)
-                  if bid in want and "7349C809" in shas and dev and fc:
-                      open(os.path.join(out, f"{bid}--{pl['UUID']}.mobileprovision"), "wb").write(raw); n += 1
-              url = d.get("links", {}).get("next")
+          for bid in ["app.latchwell.ios", "app.latchwell.ios.monitor", "app.latchwell.ios.shieldconfig", "app.latchwell.ios.shieldaction"]:
+              b = [x for x in get(base + "/bundleIds?filter[identifier]=" + bid + "&limit=50")["data"] if x["attributes"]["identifier"] == bid]
+              assert len(b) == 1, f"{bid}: {len(b)}"
+              body = {"data": {"type": "profiles", "attributes": {"name": "Latchwell Mac dev " + bid + " " + time.strftime("%Y%m%d"), "profileType": "IOS_APP_DEVELOPMENT"},
+                      "relationships": {"bundleId": {"data": {"type": "bundleIds", "id": b[0]["id"]}},
+                                        "certificates": {"data": [{"type": "certificates", "id": cert[0]["id"]}]},
+                                        "devices": {"data": [{"type": "devices", "id": dev[0]["id"]}]}}}}
+              p = post("/v1/profiles", body)["data"]
+              raw = base64.b64decode(p["attributes"]["profileContent"])
+              pl = plistlib.loads(re.search(rb"<\?xml.*?</plist>", raw, re.S).group(0))
+              print(bid, p["attributes"]["name"], "familyControls:", bool(pl["Entitlements"].get("com.apple.developer.family-controls")),
+                    "appGroups:", pl["Entitlements"].get("com.apple.security.application-groups"))
+              open(os.path.join(out, bid + ".mobileprovision"), "wb").write(raw); n += 1
           print("saved", n)
           PYX
       - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b
-        with: { name: latchwell-dev-profiles, path: "${{ runner.temp }}/profiles", retention-days: 1, if-no-files-found: error }
+        with: { name: latchwell-dev-profiles, path: "${{ runner.temp }}/profiles", retention-days: 2, if-no-files-found: error }
