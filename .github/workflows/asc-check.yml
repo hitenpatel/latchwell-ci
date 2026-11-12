@@ -1,4 +1,4 @@
-name: asc-check (read-only: fetch existing Latchwell dev profiles)
+name: asc-check (read-only, fetch existing Latchwell dev profiles)
 # Read-only: lists the Latchwell bundle IDs and their capabilities via the App Store Connect API.
 # Prints only identifiers and capability type names (no keys, ids or tokens).
 on: workflow_dispatch
