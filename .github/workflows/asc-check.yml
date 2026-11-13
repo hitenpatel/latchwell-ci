@@ -1,6 +1,6 @@
 name: asc-check
-# Read-only: lists the Latchwell bundle IDs and their capabilities via the App Store Connect API.
-# Prints only identifiers and capability type names (no keys, ids or tokens).
+# Read-only: lists the Latchwell app record, subscriptions and in-app purchases via the App Store Connect API.
+# Prints only product identifiers, states, prices and locales (no keys or tokens).
 on: workflow_dispatch
 permissions: { contents: read }
 jobs:
@@ -24,15 +24,38 @@ jobs:
           def get(url):
               r = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"})
               return json.load(urllib.request.urlopen(r))
-          want = ["app.latchwell.ios", "app.latchwell.ios.monitor", "app.latchwell.ios.shieldconfig", "app.latchwell.ios.shieldaction"]
-          d = get("https://api.appstoreconnect.apple.com/v1/bundleIds?filter[identifier]=" + ",".join(want) + "&include=bundleIdCapabilities&limit=50")
-          caps = {c["id"]: c["attributes"].get("capabilityType") for c in d.get("included", []) if c["type"] == "bundleIdCapabilities"}
-          found = {}
-          for b in d["data"]:
-              ident = b["attributes"]["identifier"]
-              if ident not in want: continue
-              ids = [x["id"] for x in b["relationships"]["bundleIdCapabilities"]["data"]]
-              found[ident] = sorted(caps.get(i, "?") for i in ids)
-          for w in want:
-              print(f"{w}: " + (", ".join(found[w]) if w in found else "MISSING"))
+          app = get("https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=app.latchwell.ios")["data"]
+          print("app record:", "FOUND " + app[0]["attributes"]["name"] if app else "MISSING")
+          if app:
+              aid = app[0]["id"]
+              for g in get(f"https://api.appstoreconnect.apple.com/v1/apps/{aid}/subscriptionGroups?limit=50")["data"]:
+                  print("group:", g["attributes"]["referenceName"])
+                  subs = get(f"https://api.appstoreconnect.apple.com/v1/subscriptionGroups/{g['id']}/subscriptions?limit=50")["data"]
+                  for sub in subs:
+                      a = sub["attributes"]
+                      print("  sub:", a["productId"], a.get("subscriptionPeriod"), a.get("state"), "level", a.get("groupLevel"))
+                      offers = get(f"https://api.appstoreconnect.apple.com/v1/subscriptions/{sub['id']}/introductoryOffers?limit=200&include=territory")["data"]
+                      kinds = sorted({(o["attributes"].get("offerMode"), o["attributes"].get("duration"), o["attributes"].get("endDate")) for o in offers}, key=str)
+                      terr = sorted({o["relationships"]["territory"]["data"]["id"] for o in offers if o.get("relationships", {}).get("territory", {}).get("data")})
+                      print("    intro offers:", len(offers), kinds, "GBR" in terr, "USA" in terr)
+                      prices = get(f"https://api.appstoreconnect.apple.com/v1/subscriptions/{sub['id']}/prices?filter[territory]=GBR,USA&include=subscriptionPricePoint,territory&limit=50")
+                      pts = {x["id"]: x["attributes"].get("customerPrice") for x in prices.get("included", []) if x["type"] == "subscriptionPricePoints"}
+                      for pr in prices["data"]:
+                          t = pr["relationships"]["territory"]["data"]["id"]; pp = pr["relationships"]["subscriptionPricePoint"]["data"]["id"]
+                          print("    price", t, pts.get(pp), "from", pr["attributes"].get("startDate"))
+                      locs = get(f"https://api.appstoreconnect.apple.com/v1/subscriptions/{sub['id']}/subscriptionLocalizations")["data"]
+                      print("    localizations:", sorted(l["attributes"]["locale"] for l in locs))
+              iaps = get(f"https://api.appstoreconnect.apple.com/v1/apps/{aid}/inAppPurchasesV2?limit=50")["data"]
+              for i in iaps:
+                  a = i["attributes"]
+                  print("iap:", a["productId"], a.get("inAppPurchaseType"), a.get("state"))
+                  try:
+                      sch = get(f"https://api.appstoreconnect.apple.com/v2/inAppPurchases/{i['id']}/iapPriceSchedule/manualPrices?include=inAppPurchasePricePoint,territory&limit=50")
+                      pts = {x["id"]: x["attributes"].get("customerPrice") for x in sch.get("included", []) if x["type"] == "inAppPurchasePricePoints"}
+                      for pr in sch["data"]:
+                          print("    price", pr["relationships"]["territory"]["data"]["id"], pts.get(pr["relationships"]["inAppPurchasePricePoint"]["data"]["id"]))
+                  except Exception as e:
+                      print("    price lookup failed", e)
+                  locs = get(f"https://api.appstoreconnect.apple.com/v2/inAppPurchases/{i['id']}/inAppPurchaseLocalizations")["data"]
+                  print("    localizations:", sorted(l["attributes"]["locale"] for l in locs))
           PY
