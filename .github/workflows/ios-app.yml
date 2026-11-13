@@ -47,7 +47,7 @@ jobs:
           set -o pipefail; cd src/ios/App
           filt() { sed -E 's#/Users/runner/[^ :]*/src/##g' | grep -E "error:|warning: unre|Test Case .* (passed|failed)|Executed|BUILD|\*\* TEST" | grep -v "^ *$" | head -80; }
           if xcodebuild test -project Latchwell.xcodeproj -scheme Latchwell -destination "id=$SIM" -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 180 -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= > "$RUNNER_TEMP/test.log" 2>&1; then
-            filt < "$RUNNER_TEMP/test.log" | grep -E "Executed|TEST SUCCEEDED" | tail -3
+            { filt < "$RUNNER_TEMP/test.log" || true; } | grep -E "Executed|TEST SUCCEEDED" | tail -3 || true
           else
             filt < "$RUNNER_TEMP/test.log" || true
             echo "--- every failed test case ---"
