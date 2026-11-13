@@ -49,9 +49,9 @@ jobs:
           if xcodebuild test -project Latchwell.xcodeproj -scheme Latchwell -destination "id=$SIM" -test-timeouts-enabled YES -default-test-execution-time-allowance 60 -maximum-test-execution-time-allowance 180 -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= > "$RUNNER_TEMP/test.log" 2>&1; then
             filt < "$RUNNER_TEMP/test.log" | grep -E "Executed|TEST SUCCEEDED" | tail -3
           else
-            filt < "$RUNNER_TEMP/test.log"
+            filt < "$RUNNER_TEMP/test.log" || true
             echo "--- every failed test case ---"
-            sed -E 's#/Users/runner/[^ :]*/src/##g' "$RUNNER_TEMP/test.log" | grep -E "error: -\[|Test Case .* failed|Test Suite .* (passed|failed)|Executed" | sort -u | cut -c1-500 | head -300
+            sed -E 's#/Users/runner/[^ :]*/src/##g' "$RUNNER_TEMP/test.log" | grep -E "error: -\[|Test Case .* failed|Test Suite .* (passed|failed)|Executed" | sort -u | cut -c1-500 | head -300 || true
             exit 1; fi
       - name: Maestro UI flows
         if: ${{ inputs.maestro }}
