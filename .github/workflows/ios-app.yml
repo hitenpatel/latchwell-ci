@@ -51,7 +51,7 @@ jobs:
           else
             filt < "$RUNNER_TEMP/test.log"
             echo "--- every failed test case ---"
-            sed -E 's#/Users/runner/[^ :]*/src/##g' "$RUNNER_TEMP/test.log" | grep -E "Test Case .* failed|Test Suite .* (passed|failed)|Executed" | sort -u | head -200
+            sed -E 's#/Users/runner/[^ :]*/src/##g' "$RUNNER_TEMP/test.log" | grep -E "error: -\[|Test Case .* failed|Test Suite .* (passed|failed)|Executed" | sort -u | cut -c1-500 | head -300
             exit 1; fi
       - name: Maestro UI flows
         if: ${{ inputs.maestro }}
