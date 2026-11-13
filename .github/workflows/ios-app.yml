@@ -52,6 +52,8 @@ jobs:
             filt < "$RUNNER_TEMP/test.log" || true
             echo "--- every failed test case ---"
             sed -E 's#/Users/runner/[^ :]*/src/##g' "$RUNNER_TEMP/test.log" | grep -E "error: -\[|Test Case .* failed|Test Suite .* (passed|failed)|Executed" | sort -u | cut -c1-500 | head -300 || true
+            echo "--- end of the test log ---"
+            tail -40 "$RUNNER_TEMP/test.log" | sed -E 's#/Users/runner/[^ :]*/src/##g' | cut -c1-400 || true
             exit 1; fi
       - name: Maestro UI flows
         if: ${{ inputs.maestro }}
