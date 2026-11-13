@@ -24,6 +24,13 @@ jobs:
           def get(url):
               r = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}"})
               return json.load(urllib.request.urlopen(r))
+          def opt(url):
+              try:
+                  d = get(url)
+                  return d if d.get("data") else None
+              except urllib.error.HTTPError as e:
+                  return None if e.code == 404 else (_ for _ in ()).throw(e)
+          import urllib.error
           app = get("https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=app.latchwell.ios")["data"]
           print("app record:", "FOUND " + app[0]["attributes"]["name"] if app else "MISSING")
           if app:
@@ -45,12 +52,21 @@ jobs:
                           print("    price", t, pts.get(pp), "from", pr["attributes"].get("startDate"))
                       locs = get(f"https://api.appstoreconnect.apple.com/v1/subscriptions/{sub['id']}/subscriptionLocalizations")["data"]
                       print("    localizations:", sorted(l["attributes"]["locale"] for l in locs))
+                  print("    review screenshot:", bool(opt(f"https://api.appstoreconnect.apple.com/v2/inAppPurchases/{i['id']}/appStoreReviewScreenshot")))
+                  av = opt(f"https://api.appstoreconnect.apple.com/v2/inAppPurchases/{i['id']}/inAppPurchaseAvailability?include=availableTerritories")
+                  print("    availability set:", bool(av), "territories:", len((av or {}).get("included", [])))
+                      print("    review screenshot:", bool(opt(f"https://api.appstoreconnect.apple.com/v1/subscriptions/{sub['id']}/appStoreReviewScreenshot")))
+                      print("    review note:", bool(a.get("reviewNote")), "family sharable:", a.get("familySharable"))
+                      av = opt(f"https://api.appstoreconnect.apple.com/v1/subscriptions/{sub['id']}/subscriptionAvailability?include=availableTerritories")
+                      print("    availability set:", bool(av), "territories:", len((av or {}).get("included", [])))
+                  gl = get(f"https://api.appstoreconnect.apple.com/v1/subscriptionGroups/{g['id']}/subscriptionGroupLocalizations")["data"]
+                  print("  group localizations:", sorted(l["attributes"]["locale"] for l in gl))
               iaps = get(f"https://api.appstoreconnect.apple.com/v1/apps/{aid}/inAppPurchasesV2?limit=50")["data"]
               for i in iaps:
                   a = i["attributes"]
                   print("iap:", a["productId"], a.get("inAppPurchaseType"), a.get("state"))
                   try:
-                      sch = get(f"https://api.appstoreconnect.apple.com/v2/inAppPurchases/{i['id']}/iapPriceSchedule/manualPrices?include=inAppPurchasePricePoint,territory&limit=50")
+                      sch = get(f"https://api.appstoreconnect.apple.com/v1/inAppPurchasePriceSchedules/{i['id']}/manualPrices?include=inAppPurchasePricePoint,territory&limit=200")
                       pts = {x["id"]: x["attributes"].get("customerPrice") for x in sch.get("included", []) if x["type"] == "inAppPurchasePricePoints"}
                       for pr in sch["data"]:
                           print("    price", pr["relationships"]["territory"]["data"]["id"], pts.get(pr["relationships"]["inAppPurchasePricePoint"]["data"]["id"]))
@@ -58,4 +74,7 @@ jobs:
                       print("    price lookup failed", e)
                   locs = get(f"https://api.appstoreconnect.apple.com/v2/inAppPurchases/{i['id']}/inAppPurchaseLocalizations")["data"]
                   print("    localizations:", sorted(l["attributes"]["locale"] for l in locs))
+                  print("    review screenshot:", bool(opt(f"https://api.appstoreconnect.apple.com/v2/inAppPurchases/{i['id']}/appStoreReviewScreenshot")))
+                  av = opt(f"https://api.appstoreconnect.apple.com/v2/inAppPurchases/{i['id']}/inAppPurchaseAvailability?include=availableTerritories")
+                  print("    availability set:", bool(av), "territories:", len((av or {}).get("included", [])))
           PY
