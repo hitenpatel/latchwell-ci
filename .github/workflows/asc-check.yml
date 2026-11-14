@@ -1,5 +1,5 @@
 name: asc-check
-# Uploads review screenshots to the Latchwell products (owner-approved 2026-11-14), then prints states. Previously read-only: lists the Latchwell bundle IDs and their capabilities via the App Store Connect API.
+# Sets UK and US availability on the Latchwell products (owner-approved 2026-11-14), then prints states. Previously read-only: lists the Latchwell bundle IDs and their capabilities via the App Store Connect API.
 # Prints only identifiers and capability type names (no keys, ids or tokens).
 on: workflow_dispatch
 permissions: { contents: read }
@@ -18,7 +18,7 @@ jobs:
           set -euo pipefail
           pip install -q pyjwt cryptography >/dev/null 2>&1
           python3 - <<'PY'
-          import base64, json, os, time, hashlib, urllib.request, urllib.error, jwt
+          import base64, json, os, time, urllib.request, urllib.error, jwt
           key = base64.b64decode(os.environ["ASC_KEY_B64"]).decode()
           tok = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()), "exp": int(time.time()) + 900, "aud": "appstoreconnect-v1"},
                            key, algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
@@ -31,31 +31,17 @@ jobs:
                       b = resp.read(); return json.loads(b) if b else {}
               except urllib.error.HTTPError as e:
                   print("HTTP", e.code, method, path, e.read().decode()[:600]); raise
-          def upload(kind, rel_name, rel_type, rel_id, path):
-              data = open(path, "rb").read()
-              res = call("POST", f"/v1/{kind}", {"data": {"type": kind, "attributes": {"fileName": os.path.basename(path), "fileSize": len(data)},
-                        "relationships": {rel_name: {"data": {"type": rel_type, "id": rel_id}}}}})
-              sid = res["data"]["id"]
-              for op in res["data"]["attributes"]["uploadOperations"]:
-                  chunk = data[op["offset"]: op["offset"] + op["length"]]
-                  h = {x["name"]: x["value"] for x in op.get("requestHeaders", [])}
-                  urllib.request.urlopen(urllib.request.Request(op["url"], method=op["method"], headers=h, data=chunk)).read()
-              call("PATCH", f"/v1/{kind}/{sid}", {"data": {"type": kind, "id": sid, "attributes": {"uploaded": True, "sourceFileChecksum": hashlib.md5(data).hexdigest()}}})
-              print("uploaded", os.path.basename(path), "->", rel_type)
-          def has(path):
-              try: return bool(call("GET", path).get("data"))
-              except urllib.error.HTTPError: return False
+          terr = {"data": [{"type": "territories", "id": "GBR"}, {"type": "territories", "id": "USA"}]}
           app = call("GET", "/v1/apps?filter[bundleId]=app.latchwell.ios")["data"][0]["id"]
           for g in call("GET", f"/v1/apps/{app}/subscriptionGroups")["data"]:
               for s in call("GET", f"/v1/subscriptionGroups/{g['id']}/subscriptions")["data"]:
-                  pid = s["attributes"]["productId"]
-                  if pid not in ("app.latchwell.ios.pro.annual", "app.latchwell.ios.pro.monthly"): continue
-                  if has(f"/v1/subscriptions/{s['id']}/appStoreReviewScreenshot"): print("already has screenshot", pid); continue
-                  upload("subscriptionAppStoreReviewScreenshots", "subscription", "subscriptions", s["id"], "review-shots/paywall-yearly.png")
+                  call("POST", "/v1/subscriptionAvailabilities", {"data": {"type": "subscriptionAvailabilities", "attributes": {"availableInNewTerritories": False},
+                       "relationships": {"subscription": {"data": {"type": "subscriptions", "id": s["id"]}}, "availableTerritories": terr}}})
+                  print("availability set", s["attributes"]["productId"])
           for i in call("GET", f"/v1/apps/{app}/inAppPurchasesV2")["data"]:
-              if i["attributes"]["productId"] != "app.latchwell.ios.pro.lifetime": continue
-              if has(f"/v2/inAppPurchases/{i['id']}/appStoreReviewScreenshot"): print("already has screenshot lifetime"); continue
-              upload("inAppPurchaseAppStoreReviewScreenshots", "inAppPurchaseV2", "inAppPurchases", i["id"], "review-shots/paywall-lifetime.png")
+              call("POST", "/v1/inAppPurchaseAvailabilities", {"data": {"type": "inAppPurchaseAvailabilities", "attributes": {"availableInNewTerritories": False},
+                   "relationships": {"inAppPurchase": {"data": {"type": "inAppPurchases", "id": i["id"]}}, "availableTerritories": terr}}})
+              print("availability set", i["attributes"]["productId"])
           time.sleep(20)
           for g in call("GET", f"/v1/apps/{app}/subscriptionGroups")["data"]:
               for s in call("GET", f"/v1/subscriptionGroups/{g['id']}/subscriptions")["data"]:
