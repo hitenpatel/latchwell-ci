@@ -40,6 +40,11 @@ jobs:
                   t = pr["relationships"]["territory"]["data"]["id"]
                   if t in ("GBR", "USA"): out[t] = pts.get(pr["relationships"][rel]["data"]["id"])
               return out
+          try:
+              st = get("/v2/sandboxTesters?limit=50")["data"]
+              print("sandbox testers:", len(st), [t["attributes"].get("territory") for t in st])
+          except Exception as e:
+              print("sandbox testers lookup failed", e)
           app = get("/v1/apps?filter[bundleId]=app.latchwell.ios")["data"]
           print("app record:", "FOUND " + app[0]["attributes"]["name"] if app else "MISSING")
           if app:
