@@ -101,6 +101,12 @@ jobs:
       - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         if: ${{ failure() && inputs.maestro }}
         with: { name: maestro-screenshots, path: "${{ runner.temp }}/maestro-debug", retention-days: 3, if-no-files-found: ignore }
+      - name: Import development certificate
+        if: ${{ inputs.ipa }}
+        env:
+          DEV_CERT_P12_B64: ${{ secrets.DEV_CERT_P12_B64 }}
+          DEV_CERT_P12_PASSWORD: ${{ secrets.DEV_CERT_P12_PASSWORD }}
+        run: bash "$GITHUB_WORKSPACE/ci/.github/scripts/import-dev-cert.sh"
       - name: Development IPA (encrypted)
         if: ${{ inputs.ipa }}
         env:
@@ -137,7 +143,7 @@ jobs:
           rm -f "$RUNNER_TEMP/roundtrip.ipa"
       - name: Cleanup signing material
         if: always()
-        run: rm -f "$RUNNER_TEMP/asc.p8"; rm -rf "$RUNNER_TEMP/out" "$RUNNER_TEMP/App.xcarchive" "$RUNNER_TEMP"/*.log
+        run: security delete-keychain "$RUNNER_TEMP/dev-signing.keychain-db" 2>/dev/null || true; rm -f "$RUNNER_TEMP/asc.p8"; rm -rf "$RUNNER_TEMP/out" "$RUNNER_TEMP/App.xcarchive" "$RUNNER_TEMP"/*.log
       - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
         if: ${{ inputs.ipa }}
         with: { name: Latchwell-ipa-enc, path: "${{ runner.temp }}/Latchwell.ipa.enc", retention-days: 7, if-no-files-found: error }
