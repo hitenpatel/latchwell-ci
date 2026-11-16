@@ -25,7 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::sha must be 40 hex chars"; exit 1; }
-                    AUTH=$(printf 'oauth2:%s' "$TOKEN" | base64); echo "::add-mask::$AUTH"; echo "::add-mask::$HOST"
+          AUTH=$(printf 'oauth2:%s' "$TOKEN" | base64); echo "::add-mask::$AUTH"; echo "::add-mask::$HOST"
           git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone -q --branch main "https://${HOST}/hiten/latchwell.git" src 2>/dev/null || { echo "::error::clone failed"; exit 1; }
           git -C src checkout -q "$SHA" || { echo "::error::checkout failed"; exit 1; }
       - name: Toolchain
