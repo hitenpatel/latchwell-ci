@@ -24,9 +24,21 @@ def call(method, path, body=None, absolute=False):
     except urllib.error.HTTPError as e:
         sys.exit(f"{method} {path.split('?')[0]} -> {e.code}: {e.read()[:400].decode(errors='replace')}")
 
-# GET /v1/apps returned 500 for this key on 2026-11-17 while /v1/bundleIds worked, so find the app through its bundle ID.
-bid = call("GET", f"/v1/bundleIds?filter%5Bidentifier%5D={BUNDLE}&include=app")
-app = next(i for i in bid.get("included", []) if i["type"] == "apps")
+def probe(path):
+    req = urllib.request.Request(API + path, headers={"Authorization": f"Bearer {tok}"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r: body = json.loads(r.read()); print("probe", path.split("?")[0], 200, [d.get("type") + ":" + d.get("id", "")[:4] for d in (body["data"] if isinstance(body.get("data"), list) else [body.get("data") or {}])][:5])
+    except urllib.error.HTTPError as e: print("probe", path.split("?")[0], e.code, e.read()[:160].decode(errors="replace").replace("\n", " "))
+if dry:
+    probe("/v1/apps?limit=5")
+    probe("/v1/apps?limit=5&fields%5Bapps%5D=bundleId,name")
+    probe("/v1/builds?limit=1")
+    probe("/v1/bundleIds?filter%5Bidentifier%5D=" + BUNDLE)
+    b = json.loads(urllib.request.urlopen(urllib.request.Request(API + "/v1/bundleIds?filter%5Bidentifier%5D=" + BUNDLE, headers={"Authorization": f"Bearer {tok}"})).read())["data"]
+    for d in b: print("bundle", d["attributes"]["identifier"]); probe(f"/v1/bundleIds/{d['id']}/app")
+# GET /v1/apps returned 500 for this key on 2026-11-17, so find the app id through the bundle ID record.
+bid = next(d for d in call("GET", f"/v1/bundleIds?filter%5Bidentifier%5D={BUNDLE}")["data"] if d["attributes"]["identifier"] == BUNDLE)
+app = call("GET", f"/v1/bundleIds/{bid['id']}/app")["data"]
 vers = call("GET", f"/v1/apps/{app['id']}/appStoreVersions?filter%5Bplatform%5D=IOS&limit=10")["data"]
 for v in vers: print("version", v["attributes"]["versionString"], v["attributes"]["appStoreState"])
 ver = next((v for v in vers if v["attributes"]["appStoreState"] in EDITABLE), None)
