@@ -62,6 +62,10 @@ jobs:
           if ! xcodebuild build -project Latchwell.xcodeproj -scheme Latchwell -configuration Release -destination "id=$SIM" -derivedDataPath "$RUNNER_TEMP/dd-release" CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/release.log" 2>&1; then
             sed -E 's#/Users/runner/[^ :]*/src/##g' "$RUNNER_TEMP/release.log" | grep -E "error:" | sort -u | head -20; exit 1; fi
           echo "release build: ok"
+          grep -o 'AppIcon.icon[^;]*lastKnownFileType = [^;]*' Latchwell.xcodeproj/project.pbxproj | head -1 || true
+          INFO="$RUNNER_TEMP/dd-release/Build/Products/Release-iphonesimulator/Latchwell.app/Info.plist"
+          ICON=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$INFO" 2>/dev/null || true)
+          [ -n "$ICON" ] && echo "app icon in bundle: $ICON" || { echo "::error::the built app has no CFBundleIconName (app icon not compiled)"; exit 1; }
       - name: Maestro UI flows
         if: ${{ inputs.maestro }}
         run: |
