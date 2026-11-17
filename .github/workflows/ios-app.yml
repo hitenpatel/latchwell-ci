@@ -55,6 +55,13 @@ jobs:
             echo "--- end of the test log ---"
             tail -40 "$RUNNER_TEMP/test.log" | sed -E 's#/Users/runner/[^ :]*/src/##g' | cut -c1-400 || true
             exit 1; fi
+      - name: Release build (simulator, unsigned)
+        run: |
+          set -o pipefail; cd src/ios/App
+          # TestFlight archives Release; this catches code that only compiles in Debug (e.g. DEBUG-only helpers).
+          if ! xcodebuild build -project Latchwell.xcodeproj -scheme Latchwell -configuration Release -destination "id=$SIM" -derivedDataPath "$RUNNER_TEMP/dd-release" CODE_SIGNING_ALLOWED=NO > "$RUNNER_TEMP/release.log" 2>&1; then
+            sed -E 's#/Users/runner/[^ :]*/src/##g' "$RUNNER_TEMP/release.log" | grep -E "error:" | sort -u | head -20; exit 1; fi
+          echo "release build: ok"
       - name: Maestro UI flows
         if: ${{ inputs.maestro }}
         run: |
