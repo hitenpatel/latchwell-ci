@@ -18,11 +18,15 @@ def call(method, path, body=None, absolute=False):
     req = urllib.request.Request(path if absolute else API + path, method=method,
                                  data=None if body is None else json.dumps(body).encode(),
                                  headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            raw = r.read(); return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as e:
-        sys.exit(f"{method} {path.split('?')[0]} -> {e.code}: {e.read()[:400].decode(errors='replace')}")
+    for attempt in range(6):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                raw = r.read(); return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            # App Store Connect returned intermittent 500s on reads (2026-11-17); retry reads only, never writes.
+            if method == "GET" and e.code >= 500 and attempt < 5:
+                print(f"{method} {path.split('?')[0]} -> {e.code}, retrying"); time.sleep(5 * 2 ** attempt); continue
+            sys.exit(f"{method} {path.split('?')[0]} -> {e.code}: {e.read()[:400].decode(errors='replace')}")
 
 # On 2026-11-17 several App Store Connect GETs returned 500 with full attributes but worked with sparse fields,
 # so every read asks only for the fields it uses.
