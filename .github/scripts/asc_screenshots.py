@@ -24,21 +24,10 @@ def call(method, path, body=None, absolute=False):
     except urllib.error.HTTPError as e:
         sys.exit(f"{method} {path.split('?')[0]} -> {e.code}: {e.read()[:400].decode(errors='replace')}")
 
-def probe(path):
-    req = urllib.request.Request(API + path, headers={"Authorization": f"Bearer {tok}"})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r: body = json.loads(r.read()); print("probe", path.split("?")[0], 200, [d.get("type") + ":" + d.get("id", "")[:4] for d in (body["data"] if isinstance(body.get("data"), list) else [body.get("data") or {}])][:5])
-    except urllib.error.HTTPError as e: print("probe", path.split("?")[0], e.code, e.read()[:160].decode(errors="replace").replace("\n", " "))
-if dry:
-    probe("/v1/apps?limit=5")
-    probe("/v1/apps?limit=5&fields%5Bapps%5D=bundleId,name")
-    probe("/v1/builds?limit=1")
-    probe("/v1/bundleIds?filter%5Bidentifier%5D=" + BUNDLE)
-    b = json.loads(urllib.request.urlopen(urllib.request.Request(API + "/v1/bundleIds?filter%5Bidentifier%5D=" + BUNDLE, headers={"Authorization": f"Bearer {tok}"})).read())["data"]
-    for d in b: print("bundle", d["attributes"]["identifier"]); probe(f"/v1/bundleIds/{d['id']}/app")
-# GET /v1/apps returned 500 for this key on 2026-11-17, so find the app id through the bundle ID record.
-bid = next(d for d in call("GET", f"/v1/bundleIds?filter%5Bidentifier%5D={BUNDLE}")["data"] if d["attributes"]["identifier"] == BUNDLE)
-app = call("GET", f"/v1/bundleIds/{bid['id']}/app")["data"]
+# GET /v1/apps with full attributes returned 500 on 2026-11-17; asking only for bundleId and name works.
+apps = call("GET", "/v1/apps?limit=50&fields%5Bapps%5D=bundleId,name")["data"]
+app = next(a for a in apps if a["attributes"]["bundleId"] == BUNDLE)
+print("app", app["attributes"]["name"])
 vers = call("GET", f"/v1/apps/{app['id']}/appStoreVersions?filter%5Bplatform%5D=IOS&limit=10")["data"]
 for v in vers: print("version", v["attributes"]["versionString"], v["attributes"]["appStoreState"])
 ver = next((v for v in vers if v["attributes"]["appStoreState"] in EDITABLE), None)
