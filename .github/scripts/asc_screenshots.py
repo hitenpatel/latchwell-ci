@@ -29,22 +29,12 @@ def call(method, path, body=None, absolute=False):
 apps = call("GET", "/v1/apps?limit=50&fields%5Bapps%5D=bundleId,name")["data"]
 app = next(a for a in apps if a["attributes"]["bundleId"] == BUNDLE)
 print("app", app["attributes"]["name"])
-if dry:
-    def probe(path):
-        req = urllib.request.Request(API + path, headers={"Authorization": f"Bearer {tok}"})
-        try:
-            with urllib.request.urlopen(req, timeout=60) as r: print("probe", path, 200, json.loads(r.read()).get("data"))
-        except urllib.error.HTTPError as e: print("probe", path, e.code)
-    a = app["id"]
-    for q in ["fields%5BappStoreVersions%5D=versionString", "fields%5BappStoreVersions%5D=versionString,appVersionState",
-              "fields%5BappStoreVersions%5D=appStoreState", "limit=2", "filter%5Bplatform%5D=IOS"]:
-        probe(f"/v1/apps/{a}/appStoreVersions?{q}")
-    probe(f"/v1/apps/{a}/relationships/appStoreVersions")
-    probe(f"/v1/apps/{a}?fields%5Bapps%5D=name&include=appStoreVersions")
-vers = call("GET", f"/v1/apps/{app['id']}/appStoreVersions?filter%5Bplatform%5D=IOS&limit=10&fields%5BappStoreVersions%5D=versionString,appStoreState")["data"]
-for v in vers: print("version", v["attributes"]["versionString"], v["attributes"]["appStoreState"])
-ver = next((v for v in vers if v["attributes"]["appStoreState"] in EDITABLE), None)
-if not ver: sys.exit("no editable App Store version")
+# Asking for appStoreState or appVersionState also returned 500 (2026-11-17), so read only versionString. Before the
+# first release an app has exactly one version, the one being prepared; refuse anything else rather than guess.
+vers = call("GET", f"/v1/apps/{app['id']}/appStoreVersions?fields%5BappStoreVersions%5D=versionString")["data"]
+for v in vers: print("version", v["attributes"]["versionString"])
+if len(vers) != 1: sys.exit("expected exactly one App Store version before the first release; pick one by hand")
+ver = vers[0]
 print("using version", ver["attributes"]["versionString"])
 locs = call("GET", f"/v1/appStoreVersions/{ver['id']}/appStoreVersionLocalizations?fields%5BappStoreVersionLocalizations%5D=locale")["data"]
 for f in files: print("file", f.name, f.stat().st_size, "bytes")
