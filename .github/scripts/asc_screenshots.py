@@ -24,7 +24,9 @@ def call(method, path, body=None, absolute=False):
     except urllib.error.HTTPError as e:
         sys.exit(f"{method} {path.split('?')[0]} -> {e.code}: {e.read()[:400].decode(errors='replace')}")
 
-app = call("GET", f"/v1/apps?filter%5BbundleId%5D={BUNDLE}")["data"][0]
+# GET /v1/apps returned 500 for this key on 2026-11-17 while /v1/bundleIds worked, so find the app through its bundle ID.
+bid = call("GET", f"/v1/bundleIds?filter%5Bidentifier%5D={BUNDLE}&include=app")
+app = next(i for i in bid.get("included", []) if i["type"] == "apps")
 vers = call("GET", f"/v1/apps/{app['id']}/appStoreVersions?filter%5Bplatform%5D=IOS&limit=10")["data"]
 for v in vers: print("version", v["attributes"]["versionString"], v["attributes"]["appStoreState"])
 ver = next((v for v in vers if v["attributes"]["appStoreState"] in EDITABLE), None)
