@@ -24,22 +24,23 @@ def call(method, path, body=None, absolute=False):
     except urllib.error.HTTPError as e:
         sys.exit(f"{method} {path.split('?')[0]} -> {e.code}: {e.read()[:400].decode(errors='replace')}")
 
-# GET /v1/apps with full attributes returned 500 on 2026-11-17; asking only for bundleId and name works.
+# On 2026-11-17 several App Store Connect GETs returned 500 with full attributes but worked with sparse fields,
+# so every read asks only for the fields it uses.
 apps = call("GET", "/v1/apps?limit=50&fields%5Bapps%5D=bundleId,name")["data"]
 app = next(a for a in apps if a["attributes"]["bundleId"] == BUNDLE)
 print("app", app["attributes"]["name"])
-vers = call("GET", f"/v1/apps/{app['id']}/appStoreVersions?filter%5Bplatform%5D=IOS&limit=10")["data"]
+vers = call("GET", f"/v1/apps/{app['id']}/appStoreVersions?filter%5Bplatform%5D=IOS&limit=10&fields%5BappStoreVersions%5D=versionString,appStoreState")["data"]
 for v in vers: print("version", v["attributes"]["versionString"], v["attributes"]["appStoreState"])
 ver = next((v for v in vers if v["attributes"]["appStoreState"] in EDITABLE), None)
 if not ver: sys.exit("no editable App Store version")
 print("using version", ver["attributes"]["versionString"])
-locs = call("GET", f"/v1/appStoreVersions/{ver['id']}/appStoreVersionLocalizations")["data"]
+locs = call("GET", f"/v1/appStoreVersions/{ver['id']}/appStoreVersionLocalizations?fields%5BappStoreVersionLocalizations%5D=locale")["data"]
 for f in files: print("file", f.name, f.stat().st_size, "bytes")
 for loc in locs:
     lang = loc["attributes"]["locale"]
-    sets = call("GET", f"/v1/appStoreVersionLocalizations/{loc['id']}/appScreenshotSets")["data"]
+    sets = call("GET", f"/v1/appStoreVersionLocalizations/{loc['id']}/appScreenshotSets?fields%5BappScreenshotSets%5D=screenshotDisplayType")["data"]
     s = next((x for x in sets if x["attributes"]["screenshotDisplayType"] == DISPLAY), None)
-    existing = call("GET", f"/v1/appScreenshotSets/{s['id']}/appScreenshots")["data"] if s else []
+    existing = call("GET", f"/v1/appScreenshotSets/{s['id']}/appScreenshots?fields%5BappScreenshots%5D=fileName")["data"] if s else []
     print(f"{lang}: set {'exists' if s else 'missing'}, {len(existing)} screenshots now")
     if dry: continue
     if not s:
