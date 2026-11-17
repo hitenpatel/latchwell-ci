@@ -10,7 +10,7 @@ folder, dry = Path(sys.argv[1]), os.environ.get("DRY_RUN") == "1"
 files = sorted(folder.glob("*.png"))
 if not files: sys.exit(f"no PNGs in {folder}")
 key = base64.b64decode(os.environ["ASC_KEY_B64"]).decode()
-tok = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()), "exp": int(time.time()) + 1100, "aud": "appstoreconnect-v1"},
+tok = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": int(time.time()), "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
                  key, algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
 API = "https://api.appstoreconnect.apple.com"
 
@@ -24,8 +24,8 @@ def call(method, path, body=None, absolute=False):
     except urllib.error.HTTPError as e:
         sys.exit(f"{method} {path.split('?')[0]} -> {e.code}: {e.read()[:400].decode(errors='replace')}")
 
-app = call("GET", f"/v1/apps?filter[bundleId]={BUNDLE}")["data"][0]
-vers = call("GET", f"/v1/apps/{app['id']}/appStoreVersions?filter[platform]=IOS&limit=10")["data"]
+app = call("GET", f"/v1/apps?filter%5BbundleId%5D={BUNDLE}")["data"][0]
+vers = call("GET", f"/v1/apps/{app['id']}/appStoreVersions?filter%5Bplatform%5D=IOS&limit=10")["data"]
 for v in vers: print("version", v["attributes"]["versionString"], v["attributes"]["appStoreState"])
 ver = next((v for v in vers if v["attributes"]["appStoreState"] in EDITABLE), None)
 if not ver: sys.exit("no editable App Store version")
