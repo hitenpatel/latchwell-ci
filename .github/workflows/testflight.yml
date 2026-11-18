@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       sha: { description: "Forgejo commit on main", required: true }
-      confirm: { description: "type UPLOAD to confirm", required: true }
+      confirm: { description: "type UPLOAD to upload, or INSPECT to export locally and print each bundle's entitlements (no upload)", required: true }
 permissions: { contents: read }
 concurrency: { group: testflight, cancel-in-progress: false }
 jobs:
@@ -17,7 +17,7 @@ jobs:
       # A guard against accidental dispatch only; the owner's approval is a procedural step (manual steps), not enforced here.
       - name: Confirm
         env: { CONFIRM: "${{ inputs.confirm }}" }
-        run: '[ "$CONFIRM" = UPLOAD ] || { echo "::error::type UPLOAD to confirm"; exit 1; }'
+        run: '[ "$CONFIRM" = UPLOAD ] || [ "$CONFIRM" = INSPECT ] || { echo "::error::type UPLOAD or INSPECT"; exit 1; }'
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with: { path: ci, sparse-checkout: .github/scripts, sparse-checkout-cone-mode: false, persist-credentials: false }
       - name: Clone source at sha
@@ -42,6 +42,7 @@ jobs:
           cd src/ios/App && xcodegen generate > "$RUNNER_TEMP/xcodegen.log" 2>&1 || { tail -20 "$RUNNER_TEMP/xcodegen.log"; exit 1; }
       - name: Archive and upload
         env:
+          CONFIRM: "${{ inputs.confirm }}"
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           ASC_KEY_B64: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_B64 }}
@@ -54,6 +55,7 @@ jobs:
           cd src/ios/App
           xcodegen generate >/dev/null
           sed "s/TEAMID/$APPLE_TEAM_ID/" "$GITHUB_WORKSPACE/ci/.github/scripts/export-appstore.plist" > "$RUNNER_TEMP/export.plist"
+          if [ "$CONFIRM" = INSPECT ]; then /usr/libexec/PlistBuddy -c "Set :destination export" "$RUNNER_TEMP/export.plist"; fi
           AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
           # Unique per run and per rerun; applied to the app and every extension by the command-line override.
           BUILD="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
@@ -66,7 +68,14 @@ jobs:
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" -exportPath "$RUNNER_TEMP/out" \
             -exportOptionsPlist "$RUNNER_TEMP/export.plist" "${AUTH[@]}" \
             > "$RUNNER_TEMP/export.log" 2>&1 || { echo "upload failed:"; sanitize < "$RUNNER_TEMP/export.log"; exit 1; }
+          # Entitlement keys of every signed bundle (values are booleans, group and domain names; no secrets).
+          ents() { for b in "$1" "$1"/PlugIns/*.appex; do echo "-- $(basename "$b")"; codesign -d --entitlements - --xml "$b" 2>/dev/null | plutil -p - 2>/dev/null | grep -Ev "team-identifier|application-identifier|get-task-allow" || echo "   (no entitlements)"; done; }
+          if [ "$CONFIRM" = INSPECT ]; then
+            mkdir -p "$RUNNER_TEMP/ipa" && unzip -q "$RUNNER_TEMP"/out/*.ipa -d "$RUNNER_TEMP/ipa"
+            echo "== exported (App Store signed) build $BUILD"; ents "$RUNNER_TEMP/ipa/Payload/Latchwell.app"
+            exit 0
+          fi
           echo "uploaded build $BUILD"
       - name: Cleanup
         if: always()
-        run: rm -f "$RUNNER_TEMP/asc.p8"; rm -rf "$RUNNER_TEMP/out" "$RUNNER_TEMP/App.xcarchive" "$RUNNER_TEMP"/*.log
+        run: rm -f "$RUNNER_TEMP/asc.p8"; rm -rf "$RUNNER_TEMP/out" "$RUNNER_TEMP/ipa" "$RUNNER_TEMP/App.xcarchive" "$RUNNER_TEMP"/*.log
