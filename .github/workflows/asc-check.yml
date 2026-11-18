@@ -35,4 +35,18 @@ jobs:
               found[ident] = sorted(caps.get(i, "?") for i in ids)
           for w in want:
               print(f"{w}: " + (", ".join(found[w]) if w in found else "MISSING"))
+          # Provisioning profiles for those bundle ids: type, state, dates and which Screen Time entitlement keys
+          # their embedded entitlements carry (key names only, no values beyond true/false).
+          import plistlib, re
+          for b in d["data"]:
+              ident = b["attributes"]["identifier"]
+              if ident not in want: continue
+              ps = get(f"https://api.appstoreconnect.apple.com/v1/bundleIds/{b['id']}/profiles?limit=50")["data"]
+              for p in ps:
+                  a = p["attributes"]
+                  raw = base64.b64decode(a.get("profileContent") or "")
+                  m = re.search(rb"<\?xml.*?</plist>", raw, re.S)
+                  ent = plistlib.loads(m.group(0)).get("Entitlements", {}) if m else {}
+                  fc = {k: v for k, v in ent.items() if "family-controls" in k}
+                  print(f"  profile {ident} {a.get('profileType')} {a.get('profileState')} created={str(a.get('createdDate'))[:10]} expires={str(a.get('expirationDate'))[:10]} family-controls={fc or 'ABSENT'}")
           PY
