@@ -73,6 +73,46 @@ print("availability", avail and avail["data"]["attributes"])
 pp = call("GET", f"/v1/apps/{A}/appPricePoints?filter%5Bterritory%5D=GBR&limit=1", fatal=False)
 print("price points reachable", bool(pp))
 
-if not apply:
+ps = call("GET", f"/v1/apps/{A}/appPriceSchedule?include=baseTerritory", fatal=False)
+print("priceSchedule", ps and (ps["data"]["relationships"]["baseTerritory"]["data"] or {}).get("id"))
+for x in (groups or {}).get("included", []):
+    pr = call("GET", f"/v1/subscriptions/{x['id']}/prices?limit=200&include=territory", fatal=False)
+    print("subscription prices", x["attributes"]["productId"], sorted({d["relationships"]["territory"]["data"]["id"] for d in (pr or {}).get("data", [])})[:12], len((pr or {}).get("data", [])))
+
+if not apply or not spec:
     sys.exit(0)
-print("APPLY is not implemented yet"); sys.exit(1)
+print("\n=== APPLY ===")
+failed = []
+def write(label, method, path, body):
+    r = call(method, path, body, fatal=False)
+    print("ok  " if r is not None else "FAIL", label); failed.extend([] if r is not None else [label]); return r
+
+write("app content rights", "PATCH", f"/v1/apps/{A}", {"data": {"type": "apps", "id": A, "attributes": spec["app"]}})
+write("primary category", "PATCH", f"/v1/appInfos/{info['id']}", {"data": {"type": "appInfos", "id": info["id"],
+      "relationships": {"primaryCategory": {"data": {"type": "appCategories", "id": spec["primaryCategory"]}}}}})
+have = {l["attributes"]["locale"]: l for l in ilocs}
+for loc, attrs in spec["appInfoLocalizations"].items():
+    if loc in have:
+        a = {k: v for k, v in attrs.items() if k != "name" or v != have[loc]["attributes"]["name"]}
+        write(f"app info {loc}", "PATCH", f"/v1/appInfoLocalizations/{have[loc]['id']}", {"data": {"type": "appInfoLocalizations", "id": have[loc]["id"], "attributes": a}})
+    else:
+        write(f"app info {loc} (new)", "POST", "/v1/appInfoLocalizations", {"data": {"type": "appInfoLocalizations", "attributes": {"locale": loc, **attrs},
+              "relationships": {"appInfo": {"data": {"type": "appInfos", "id": info["id"]}}}}})
+have = {l["attributes"]["locale"]: l for l in vlocs}
+for loc, attrs in spec["versionLocalizations"].items():
+    if loc in have:
+        write(f"version text {loc}", "PATCH", f"/v1/appStoreVersionLocalizations/{have[loc]['id']}", {"data": {"type": "appStoreVersionLocalizations", "id": have[loc]["id"], "attributes": attrs}})
+    else:
+        write(f"version text {loc} (new)", "POST", "/v1/appStoreVersionLocalizations", {"data": {"type": "appStoreVersionLocalizations", "attributes": {"locale": loc, **attrs},
+              "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": V}}}}})
+write("version attributes", "PATCH", f"/v1/appStoreVersions/{V}", {"data": {"type": "appStoreVersions", "id": V, "attributes": spec["version"]}})
+bid = next((x["id"] for x in builds if x["attributes"]["version"] == spec["build"] and x["attributes"]["processingState"] == "VALID"), None)
+if bid: write(f"build {spec['build']}", "PATCH", f"/v1/appStoreVersions/{V}/relationships/build", {"data": {"type": "builds", "id": bid}})
+else: print("FAIL build", spec["build"], "not found or not processed"); failed.append("build")
+if age: write("age rating", "PATCH", f"/v1/ageRatingDeclarations/{age['data']['id']}", {"data": {"type": "ageRatingDeclarations", "id": age["data"]["id"], "attributes": spec["ageRating"]}})
+if rd and rd.get("data"):
+    write("review notes", "PATCH", f"/v1/appStoreReviewDetails/{rd['data']['id']}", {"data": {"type": "appStoreReviewDetails", "id": rd["data"]["id"], "attributes": {"notes": spec["reviewNotes"], "demoAccountRequired": False}}})
+else:
+    write("review notes (new)", "POST", "/v1/appStoreReviewDetails", {"data": {"type": "appStoreReviewDetails", "attributes": {"notes": spec["reviewNotes"], "demoAccountRequired": False},
+          "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": V}}}}})
+print("failed:", failed or "none"); sys.exit(1 if failed else 0)
