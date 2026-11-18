@@ -52,7 +52,7 @@ if age: show("ageRatingDeclaration", age["data"]["attributes"])
 vers = call("GET", f"/v1/apps/{A}/appStoreVersions?fields%5BappStoreVersions%5D=versionString")["data"]
 if len(vers) != 1: sys.exit(f"expected one pre-release version, found {len(vers)}")
 V = vers[0]["id"]
-for f in ["copyright", "releaseType", "earliestReleaseDate", "usesIdfa", "downloadable"]:
+for f in ["appVersionState", "appStoreState", "copyright", "releaseType", "earliestReleaseDate", "usesIdfa", "downloadable"]:
     r = call("GET", f"/v1/appStoreVersions/{V}?fields%5BappStoreVersions%5D={f}", fatal=False)
     print(f"version.{f} =", None if r is None else r["data"]["attributes"].get(f))
 b = call("GET", f"/v1/appStoreVersions/{V}/build", fatal=False)
@@ -82,6 +82,9 @@ for x in (groups or {}).get("included", []):
     pr = call("GET", f"/v1/subscriptions/{x['id']}/prices?limit=200&include=territory", fatal=False)
     print("subscription prices", x["attributes"]["productId"], sorted({d["relationships"]["territory"]["data"]["id"] for d in (pr or {}).get("data", [])})[:12], len((pr or {}).get("data", [])))
 
+subs = call("GET", f"/v1/reviewSubmissions?filter%5Bapp%5D={A}&limit=5&include=items", fatal=False)
+for x in (subs or {}).get("data", []): print("reviewSubmission", x["attributes"].get("state"), x["attributes"].get("submittedDate"), "items", len(x.get("relationships", {}).get("items", {}).get("data") or []))
+for x in (subs or {}).get("included", []): print("  item", x["attributes"].get("state"))
 if not apply or not spec:
     sys.exit(0)
 print("\n=== APPLY ===")
