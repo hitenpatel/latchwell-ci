@@ -1,6 +1,6 @@
 """Report, and with APPLY=1 set, the App Store metadata of Latchwell's single pre-release version from a JSON file
 committed in the app repo (docs/release/app-store-metadata.json). Without APPLY it only reads and prints.
-Never submits for review and never touches pricing or availability. Secrets come from env."""
+Never submits for review and never changes prices; sets availability only when none exists yet. Secrets come from env."""
 import base64, json, os, sys, time, urllib.request, urllib.error
 import jwt
 
@@ -115,4 +115,12 @@ if rd and rd.get("data"):
 else:
     write("review notes (new)", "POST", "/v1/appStoreReviewDetails", {"data": {"type": "appStoreReviewDetails", "attributes": {"notes": spec["reviewNotes"], "demoAccountRequired": False},
           "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": V}}}}})
+if spec.get("availability") and avail is None:
+    terr = spec["availability"]
+    write("availability " + ",".join(terr), "POST", "/v2/appAvailabilities", {
+        "data": {"type": "appAvailabilities", "attributes": {"availableInNewTerritories": False},
+                 "relationships": {"app": {"data": {"type": "apps", "id": A}},
+                                   "territoryAvailabilities": {"data": [{"type": "territoryAvailabilities", "id": f"${{{t}}}"} for t in terr]}}},
+        "included": [{"type": "territoryAvailabilities", "id": f"${{{t}}}", "attributes": {"available": True},
+                      "relationships": {"territory": {"data": {"type": "territories", "id": t}}}} for t in terr]})
 print("failed:", failed or "none"); sys.exit(1 if failed else 0)
