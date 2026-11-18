@@ -110,17 +110,24 @@ bid = next((x["id"] for x in builds if x["attributes"]["version"] == spec["build
 if bid: write(f"build {spec['build']}", "PATCH", f"/v1/appStoreVersions/{V}/relationships/build", {"data": {"type": "builds", "id": bid}})
 else: print("FAIL build", spec["build"], "not found or not processed"); failed.append("build")
 if age: write("age rating", "PATCH", f"/v1/ageRatingDeclarations/{age['data']['id']}", {"data": {"type": "ageRatingDeclarations", "id": age["data"]["id"], "attributes": spec["ageRating"]}})
-if rd and rd.get("data"):
+if rd and rd.get("data") and rd["data"]["attributes"].get("notes") == spec["reviewNotes"]:
+    print("same review notes")
+elif rd and rd.get("data"):
     write("review notes", "PATCH", f"/v1/appStoreReviewDetails/{rd['data']['id']}", {"data": {"type": "appStoreReviewDetails", "id": rd["data"]["id"], "attributes": {"notes": spec["reviewNotes"], "demoAccountRequired": False}}})
 else:
     write("review notes (new)", "POST", "/v1/appStoreReviewDetails", {"data": {"type": "appStoreReviewDetails", "attributes": {"notes": spec["reviewNotes"], "demoAccountRequired": False},
           "relationships": {"appStoreVersion": {"data": {"type": "appStoreVersions", "id": V}}}}})
 if spec.get("availability") and avail is None:
-    terr = spec["availability"]
-    write("availability " + ",".join(terr), "POST", "/v2/appAvailabilities", {
-        "data": {"type": "appAvailabilities", "attributes": {"availableInNewTerritories": False},
-                 "relationships": {"app": {"data": {"type": "apps", "id": A}},
-                                   "territoryAvailabilities": {"data": [{"type": "territoryAvailabilities", "id": f"${{{t}}}"} for t in terr]}}},
-        "included": [{"type": "territoryAvailabilities", "id": f"${{{t}}}", "attributes": {"available": True},
-                      "relationships": {"territory": {"data": {"type": "territories", "id": t}}}} for t in terr]})
+    # The API wants every territory listed, each marked available or not.
+    on = set(spec["availability"])
+    allt = [t["id"] for t in call("GET", "/v1/territories?limit=200")["data"]]
+    missing = on - set(allt)
+    if missing: print("FAIL unknown territories", missing); failed.append("availability")
+    else:
+        write("availability " + ",".join(sorted(on)) + f" (of {len(allt)})", "POST", "/v2/appAvailabilities", {
+            "data": {"type": "appAvailabilities", "attributes": {"availableInNewTerritories": False},
+                     "relationships": {"app": {"data": {"type": "apps", "id": A}},
+                                       "territoryAvailabilities": {"data": [{"type": "territoryAvailabilities", "id": f"${{{t}}}"} for t in allt]}}},
+            "included": [{"type": "territoryAvailabilities", "id": f"${{{t}}}", "attributes": {"available": t in on},
+                          "relationships": {"territory": {"data": {"type": "territories", "id": t}}}} for t in allt]})
 print("failed:", failed or "none"); sys.exit(1 if failed else 0)
